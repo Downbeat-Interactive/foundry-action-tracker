@@ -59,6 +59,12 @@
   "ACTION-TRACKER.Icon5Settings": "Icon 5 Settings",
   "ACTION-TRACKER.AutoMarkActions": "Auto-Mark Actions",
   "ACTION-TRACKER.AutoMarkActionsHint": "Automatically mark the Action, Bonus Action, or Reaction icon when an item is used in combat (requires D&D 5e v4+ and optionally MIDI-QOL).",
+  "ACTION-TRACKER.AutoMarkMovement": "Auto-Mark Movement (Icon 4)",
+  "ACTION-TRACKER.AutoMarkMovementHint": "Automatically mark the Movement icon (icon 4) when a token moves in combat. Requires icon count set to at least 4.",
+  "ACTION-TRACKER.AutoMarkMovementOff": "Disabled",
+  "ACTION-TRACKER.AutoMarkMovementAny": "Any movement",
+  "ACTION-TRACKER.AutoMarkMovementHalf": "Half speed or more",
+  "ACTION-TRACKER.AutoMarkMovementFull": "Full speed or more",
   "ACTION-TRACKER.Debug": "Enable Debug Logging",
   "ACTION-TRACKER.DebugHint": "Log detailed information to the console for troubleshooting. Disable for normal use."
 }

@@ -79,6 +79,21 @@ Hooks.once("init", () => {
     default: true
   });
 
+  game.settings.register("action-tracker", "autoMarkMovement", {
+    name: game.i18n.localize("ACTION-TRACKER.AutoMarkMovement"),
+    hint: game.i18n.localize("ACTION-TRACKER.AutoMarkMovementHint"),
+    scope: "world",
+    config: true,
+    type: String,
+    choices: {
+      "off":  game.i18n.localize("ACTION-TRACKER.AutoMarkMovementOff"),
+      "any":  game.i18n.localize("ACTION-TRACKER.AutoMarkMovementAny"),
+      "half": game.i18n.localize("ACTION-TRACKER.AutoMarkMovementHalf"),
+      "full": game.i18n.localize("ACTION-TRACKER.AutoMarkMovementFull")
+    },
+    default: "full"
+  });
+
   game.settings.register("action-tracker", "debug", {
     name: game.i18n.localize("ACTION-TRACKER.Debug"),
     hint: game.i18n.localize("ACTION-TRACKER.DebugHint"),
@@ -193,6 +208,9 @@ function playSound(src) {
 
 // SVG caching for performance
 const svgCache = new Map();
+
+// Cumulative feet moved per token this turn, keyed by TokenDocument id
+const tokenMovementMap = new Map();
 async function getSvgElement(image, tint, used, removeColor, size = "20px") {
   if (!svgCache.has(image)) {
     try {
@@ -231,12 +249,23 @@ Hooks.on("preCreateToken", (tokenDoc, data, options, userId) => {
   tokenDoc.updateSource({ flags: { "action-tracker": flags } });
 });
 
-Hooks.on("updateToken", (tokenDoc, updates) => {
+// Capture pre-move position so updateToken can compute distance
+Hooks.on("preUpdateToken", (tokenDoc, updates, options, userId) => {
+  if (updates.x !== undefined || updates.y !== undefined) {
+    options._prevX = tokenDoc.x;
+    options._prevY = tokenDoc.y;
+  }
+});
+
+Hooks.on("updateToken", async (tokenDoc, updates, options, userId) => {
   if (updates.flags?.["action-tracker"] && game.combat && ui.combat) {
     ui.combat.render({ force: true });
     if (canvas.hud?.token?.object?.document === tokenDoc) {
       canvas.hud.token.render({ force: true });
     }
+  }
+  if (options?._prevX !== undefined || options?._prevY !== undefined) {
+    await trackTokenMovement(tokenDoc, options);
   }
 });
 
@@ -497,6 +526,7 @@ Hooks.on("deleteCombat", (combat, options, userId) => {
       console.warn(`Action Tracker | No token found for combatant ${c.name} on combat end`);
     }
   });
+  tokenMovementMap.clear();
 });
 
 function resetActions(token) {
@@ -506,11 +536,49 @@ function resetActions(token) {
     flags[`action${i}`] = { used: false };
   }
   token.document.update({ flags: { "action-tracker": flags } });
+  tokenMovementMap.delete(token.document.id);
   if (game.settings.get("action-tracker", "debug")) {
     console.log(`Action Tracker | Reset icons for ${token.name}`);
   }
   if (game.combat && ui.combat) ui.combat.render({ force: true });
   if (canvas.hud?.token?.object === token) canvas.hud.token.render({ force: true });
+}
+
+function getSegmentDistance(prevX, prevY, newX, newY) {
+  const dx = newX - prevX;
+  const dy = newY - prevY;
+  const pixels = Math.sqrt(dx * dx + dy * dy);
+  return (pixels / canvas.grid.size) * canvas.scene.grid.distance;
+}
+
+async function trackTokenMovement(tokenDoc, options) {
+  const setting = game.settings.get("action-tracker", "autoMarkMovement");
+  if (setting === "off") return;
+  if (!game.combat) return;
+  if (!game.combat.combatants.some(c => c.tokenId === tokenDoc.id)) return;
+
+  const moveIconIndex = 3;
+  if (moveIconIndex >= game.settings.get("action-tracker", "iconCount")) return;
+
+  const prevX = options._prevX ?? tokenDoc.x;
+  const prevY = options._prevY ?? tokenDoc.y;
+  const segDist = getSegmentDistance(prevX, prevY, tokenDoc.x, tokenDoc.y);
+
+  const total = (tokenMovementMap.get(tokenDoc.id) ?? 0) + segDist;
+  tokenMovementMap.set(tokenDoc.id, total);
+
+  const alreadyUsed = tokenDoc.getFlag("action-tracker", `action${moveIconIndex}`)?.used;
+  if (alreadyUsed) return;
+
+  const walkSpeed = tokenDoc.actor?.system?.attributes?.movement?.walk ?? 30;
+  const threshold = setting === "any" ? 0 : setting === "half" ? walkSpeed / 2 : walkSpeed;
+
+  if (total > threshold) {
+    if (game.settings.get("action-tracker", "debug")) {
+      console.log(`Action Tracker | Auto-marking movement (${total.toFixed(1)}ft / threshold ${threshold}ft) for ${tokenDoc.name}`);
+    }
+    await tokenDoc.setFlag("action-tracker", `action${moveIconIndex}.used`, true);
+  }
 }
 
 // Map DnD5e activation types to icon indices (matches default icon order)
