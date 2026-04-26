@@ -225,6 +225,11 @@ const svgCache = new Map();
 
 // Cumulative feet moved per token this turn, keyed by TokenDocument id
 const tokenMovementMap = new Map();
+
+// Previous pixel position before a move, keyed by TokenDocument id
+// Stored here instead of the options object because Foundry v14 does not
+// guarantee the same options reference is passed to both preUpdateToken and updateToken.
+const tokenPrevPosition = new Map();
 async function getSvgElement(image, tint, used, removeColor, size = "20px") {
   if (!svgCache.has(image)) {
     try {
@@ -263,11 +268,10 @@ Hooks.on("preCreateToken", (tokenDoc, data, options, userId) => {
   tokenDoc.updateSource({ flags: { "action-tracker": flags } });
 });
 
-// Capture pre-move position so updateToken can compute distance
+// Capture pre-move position before Foundry applies the update
 Hooks.on("preUpdateToken", (tokenDoc, updates, options, userId) => {
   if (updates.x !== undefined || updates.y !== undefined) {
-    options._prevX = tokenDoc.x;
-    options._prevY = tokenDoc.y;
+    tokenPrevPosition.set(tokenDoc.id, { x: tokenDoc.x, y: tokenDoc.y });
   }
 });
 
@@ -281,8 +285,10 @@ Hooks.on("updateToken", async (tokenDoc, updates, options, userId) => {
       tokenDoc.actor.sheet.render({ force: true });
     }
   }
-  if (options?._prevX !== undefined || options?._prevY !== undefined) {
-    await trackTokenMovement(tokenDoc, options);
+  if (tokenPrevPosition.has(tokenDoc.id)) {
+    const prev = tokenPrevPosition.get(tokenDoc.id);
+    tokenPrevPosition.delete(tokenDoc.id);
+    await trackTokenMovement(tokenDoc, prev.x, prev.y);
   }
 });
 
@@ -507,25 +513,27 @@ function getTokenDocForSheet(actor, setting) {
   return actor.getActiveTokens(false, false)[0]?.document ?? null;
 }
 
-Hooks.on("renderActorSheet", async (sheet, html, data) => {
+async function renderActorSheetHandler(sheet, html, data) {
   const setting = game.settings.get("action-tracker", "showOnSheet");
   if (setting === "off") return;
 
   const actor = sheet.actor ?? sheet.document;
-  if (!actor) return;
+  if (!(actor instanceof Actor)) return;
 
   const tokenDoc = getTokenDocForSheet(actor, setting);
   if (!tokenDoc) return;
 
   const root = html instanceof HTMLElement ? html : html[0];
 
+  // Try common dnd5e selectors for the HP section; log what we find in debug mode
   const hpSection = root.querySelector(".hit-points")
+    ?? root.querySelector("[class*='hit-points']")
     ?? root.querySelector(".attribute.hit-points")
     ?? root.querySelector(".hp");
 
   if (!hpSection) {
     if (game.settings.get("action-tracker", "debug")) {
-      console.warn("Action Tracker | Could not find HP section on actor sheet");
+      console.warn(`Action Tracker | Could not find HP section on ${sheet.constructor.name} — enable debug and check the sheet HTML`);
     }
     return;
   }
@@ -567,7 +575,7 @@ Hooks.on("renderActorSheet", async (sheet, html, data) => {
   }
 
   hpSection.before(container);
-});
+}
 
 Hooks.on("updateCombat", (combat, update, options, userId) => {
   const resetTiming = game.settings.get("action-tracker", "resetTiming");
@@ -615,6 +623,7 @@ Hooks.on("deleteCombat", (combat, options, userId) => {
     }
   });
   tokenMovementMap.clear();
+  tokenPrevPosition.clear();
 });
 
 function resetActions(token) {
@@ -639,7 +648,7 @@ function getSegmentDistance(prevX, prevY, newX, newY) {
   return (pixels / canvas.grid.size) * canvas.scene.grid.distance;
 }
 
-async function trackTokenMovement(tokenDoc, options) {
+async function trackTokenMovement(tokenDoc, prevX, prevY) {
   const setting = game.settings.get("action-tracker", "autoMarkMovement");
   if (setting === "off") return;
   if (!game.combat) return;
@@ -648,8 +657,6 @@ async function trackTokenMovement(tokenDoc, options) {
   const moveIconIndex = 3;
   if (moveIconIndex >= game.settings.get("action-tracker", "iconCount")) return;
 
-  const prevX = options._prevX ?? tokenDoc.x;
-  const prevY = options._prevY ?? tokenDoc.y;
   const segDist = getSegmentDistance(prevX, prevY, tokenDoc.x, tokenDoc.y);
 
   const total = (tokenMovementMap.get(tokenDoc.id) ?? 0) + segDist;
@@ -704,8 +711,26 @@ async function autoMarkActionForToken(tokenDoc, activationType) {
   await tokenDoc.setFlag("action-tracker", `action${iconIndex}.used`, true);
 }
 
-// Register auto-marking hooks after all modules are loaded
+// Register auto-marking and sheet hooks after all modules/sheets are loaded
 Hooks.once("ready", () => {
+  // Register renderActorSheetHandler for every actor sheet type registered in CONFIG.
+  // We can't use "renderActorSheet" because Foundry v14 ApplicationV2 sheets only fire
+  // hooks named after their exact class (e.g. "renderActorSheet5eCharacter"), not parent classes.
+  const seenClasses = new Set();
+  const debug = game.settings.get("action-tracker", "debug");
+  for (const tierSheets of Object.values(CONFIG.Actor.sheetClasses ?? {})) {
+    for (const config of Object.values(tierSheets)) {
+      const name = config?.cls?.name;
+      if (name && !seenClasses.has(name)) {
+        seenClasses.add(name);
+        Hooks.on(`render${name}`, renderActorSheetHandler);
+        if (debug) console.log(`Action Tracker | Registered sheet hook: render${name}`);
+      }
+    }
+  }
+  // Legacy catch-all for any AppV1 sheet not covered above
+  Hooks.on("renderActorSheet", renderActorSheetHandler);
+
   if (game.modules.get("midi-qol")?.active) {
     if (game.settings.get("action-tracker", "debug")) {
       console.log("Action Tracker | MIDI-QOL detected - using midi-qol.RollComplete for auto-marking");
