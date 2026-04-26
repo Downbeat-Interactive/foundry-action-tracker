@@ -81,4 +81,26 @@
   opacity: 1;
 }
 
+.action-tracker-sheet {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0;
+  justify-content: center;
+  margin-bottom: 4px;
+}
 
+.action-dot-wrapper-sheet {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  position: relative;
+}
+
+.action-dot-wrapper-sheet svg {
+  border: 1px solid;
+  border-radius: 4px;
+}
+
+.action-dot-wrapper-sheet svg.used {
+  opacity: 0.25;
+}

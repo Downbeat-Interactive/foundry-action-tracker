@@ -79,6 +79,20 @@ Hooks.once("init", () => {
     default: true
   });
 
+  game.settings.register("action-tracker", "showOnSheet", {
+    name: game.i18n.localize("ACTION-TRACKER.ShowOnSheet"),
+    hint: game.i18n.localize("ACTION-TRACKER.ShowOnSheetHint"),
+    scope: "world",
+    config: true,
+    type: String,
+    choices: {
+      "off":    game.i18n.localize("ACTION-TRACKER.ShowOnSheetOff"),
+      "combat": game.i18n.localize("ACTION-TRACKER.ShowOnSheetCombat"),
+      "always": game.i18n.localize("ACTION-TRACKER.ShowOnSheetAlways")
+    },
+    default: "combat"
+  });
+
   game.settings.register("action-tracker", "autoMarkMovement", {
     name: game.i18n.localize("ACTION-TRACKER.AutoMarkMovement"),
     hint: game.i18n.localize("ACTION-TRACKER.AutoMarkMovementHint"),
@@ -258,10 +272,13 @@ Hooks.on("preUpdateToken", (tokenDoc, updates, options, userId) => {
 });
 
 Hooks.on("updateToken", async (tokenDoc, updates, options, userId) => {
-  if (updates.flags?.["action-tracker"] && game.combat && ui.combat) {
-    ui.combat.render({ force: true });
+  if (updates.flags?.["action-tracker"]) {
+    if (game.combat && ui.combat) ui.combat.render({ force: true });
     if (canvas.hud?.token?.object?.document === tokenDoc) {
       canvas.hud.token.render({ force: true });
+    }
+    if (game.settings.get("action-tracker", "showOnSheet") !== "off" && tokenDoc.actor?.sheet?.rendered) {
+      tokenDoc.actor.sheet.render({ force: true });
     }
   }
   if (options?._prevX !== undefined || options?._prevY !== undefined) {
@@ -479,6 +496,77 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
 
     nameElement.after(iconBar);
   }
+});
+
+function getTokenDocForSheet(actor, setting) {
+  if (game.combat) {
+    const combatant = game.combat.combatants.find(c => c.actor === actor);
+    if (combatant?.token) return combatant.token;
+  }
+  if (setting !== "always") return null;
+  return actor.getActiveTokens(false, false)[0]?.document ?? null;
+}
+
+Hooks.on("renderActorSheet", async (sheet, html, data) => {
+  const setting = game.settings.get("action-tracker", "showOnSheet");
+  if (setting === "off") return;
+
+  const actor = sheet.actor ?? sheet.document;
+  if (!actor) return;
+
+  const tokenDoc = getTokenDocForSheet(actor, setting);
+  if (!tokenDoc) return;
+
+  const root = html instanceof HTMLElement ? html : html[0];
+
+  const hpSection = root.querySelector(".hit-points")
+    ?? root.querySelector(".attribute.hit-points")
+    ?? root.querySelector(".hp");
+
+  if (!hpSection) {
+    if (game.settings.get("action-tracker", "debug")) {
+      console.warn("Action Tracker | Could not find HP section on actor sheet");
+    }
+    return;
+  }
+
+  root.querySelector(".action-tracker-sheet")?.remove();
+
+  const iconCount = game.settings.get("action-tracker", "iconCount");
+  const removeColor = game.settings.get("action-tracker", "removeColorWhenUsed");
+  const enableSounds = game.settings.get("action-tracker", "enableSounds");
+
+  const container = document.createElement("div");
+  container.className = "action-tracker-sheet";
+
+  for (let i = 0; i < iconCount; i++) {
+    const image = game.settings.get("action-tracker", `icon${i}Image`);
+    const text = game.settings.get("action-tracker", `icon${i}Text`);
+    const sound = game.settings.get("action-tracker", `icon${i}Sound`);
+    let tint = game.settings.get("action-tracker", `icon${i}Tint`);
+    const used = tokenDoc.getFlag("action-tracker", `action${i}`)?.used || false;
+
+    if (!tint.match(/^#[0-9A-Fa-f]{6}$/)) tint = "#ffffff";
+
+    const svgElement = await getSvgElement(image, tint, used, removeColor);
+
+    const dotWrapper = document.createElement("div");
+    dotWrapper.className = "action-dot-wrapper-sheet";
+    dotWrapper.setAttribute("data-tooltip", text);
+    dotWrapper.appendChild(svgElement);
+
+    dotWrapper.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      const newState = !used;
+      await tokenDoc.setFlag("action-tracker", `action${i}.used`, newState);
+      if (enableSounds) playSound(sound);
+    });
+
+    container.appendChild(dotWrapper);
+  }
+
+  hpSection.before(container);
 });
 
 Hooks.on("updateCombat", (combat, update, options, userId) => {
