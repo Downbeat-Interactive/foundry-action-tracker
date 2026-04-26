@@ -269,20 +269,18 @@ Hooks.on("preCreateToken", (tokenDoc, data, options, userId) => {
 
 Hooks.on("updateToken", async (tokenDoc, updates, options, userId) => {
   if (updates.flags?.["action-tracker"]) {
-    if (game.combat && ui.combat) ui.combat.render({ force: true });
-    if (canvas.hud?.token?.object?.document === tokenDoc) {
-      canvas.hud.token.render({ force: true });
-    }
-    if (game.settings.get("action-tracker", "showOnSheet") !== "off" && tokenDoc.actor?.sheet?.rendered) {
-      tokenDoc.actor.sheet.render({ force: true });
-    }
+    refreshTokenDisplays(tokenDoc);
   }
 
   if (updates.x !== undefined || updates.y !== undefined) {
     const prev = tokenLastKnownPosition.get(tokenDoc.id);
-    tokenLastKnownPosition.set(tokenDoc.id, { x: tokenDoc.x, y: tokenDoc.y });
+    const next = {
+      x: updates.x ?? tokenDoc.x,
+      y: updates.y ?? tokenDoc.y
+    };
+    tokenLastKnownPosition.set(tokenDoc.id, next);
     if (prev) {
-      const segDist = getSegmentDistance(prev.x, prev.y, tokenDoc.x, tokenDoc.y);
+      const segDist = getSegmentDistance(prev.x, prev.y, next.x, next.y);
       const total = (tokenMovementMap.get(tokenDoc.id) ?? 0) + segDist;
       tokenMovementMap.set(tokenDoc.id, total);
       await trackTokenMovement(tokenDoc, total);
@@ -580,26 +578,30 @@ async function renderActorSheetHandler(sheet, html, data) {
   insertTarget.before(container);
 }
 
-Hooks.on("combatStart", (combat) => {
-  seedCurrentCombatantPosition(combat);
+Hooks.on("createCombat", (combat) => {
+  seedCombatantPositions(combat);
 });
 
-Hooks.on("updateCombat", (combat, update, options, userId) => {
+Hooks.on("combatStart", (combat) => {
+  seedCombatantPositions(combat);
+});
+
+Hooks.on("updateCombat", async (combat, update, options, userId) => {
   const resetTiming = game.settings.get("action-tracker", "resetTiming");
 
   if (game.settings.get("action-tracker", "debug")) {
     console.log(`Action Tracker | updateCombat: turn: ${update.turn}, round: ${update.round}`);
   }
 
-  // Seed movement tracking whenever the turn changes so we have a reliable
-  // starting position for the new combatant regardless of hook ordering.
-  if (update.turn !== undefined) {
-    seedCurrentCombatantPosition(combat);
+  // Seed movement tracking whenever turn state changes. Seeding all combatants
+  // makes the first movement reliable even for out-of-turn movement.
+  if (update.turn !== undefined || update.round !== undefined) {
+    seedCombatantPositions(combat);
   }
 
   if (resetTiming === "turnStart" && update.turn !== undefined) {
     const currentToken = combat.combatant?.token?.object;
-    if (currentToken?.document) resetActions(currentToken);
+    if (currentToken?.document) await resetActions(currentToken);
     else if (game.settings.get("action-tracker", "debug")) {
       console.warn("Action Tracker | No valid current token for turnStart reset");
     }
@@ -609,23 +611,27 @@ Hooks.on("updateCombat", (combat, update, options, userId) => {
     const previousCombatant = prevTurnIndex !== undefined ? combat.turns?.[prevTurnIndex] : null;
     const previousToken = previousCombatant?.token?.object
       ?? (previousCombatant ? canvas.tokens.get(previousCombatant.tokenId) : null);
-    if (previousToken?.document) resetActions(previousToken);
+    if (previousToken?.document) await resetActions(previousToken);
     else if (game.settings.get("action-tracker", "debug")) {
       console.warn("Action Tracker | No valid previous token for turnEnd reset");
     }
   } else if (resetTiming === "roundEnd" && update.round !== undefined && update.turn === 0) {
-    combat.combatants.forEach(c => {
+    await Promise.all(combat.combatants.map(c => {
       const token = c.token?.object ?? canvas.tokens.get(c.tokenId);
-      if (token?.document) resetActions(token);
+      if (token?.document) return resetActions(token);
       else if (game.settings.get("action-tracker", "debug")) {
         console.warn(`Action Tracker | Invalid token in combatant: ${c.name}`);
       }
-    });
+    }));
   }
 });
 
-function seedCurrentCombatantPosition(combat) {
-  const combatant = combat?.combatant;
+function seedCombatantPositions(combat) {
+  if (!combat?.combatants) return;
+  combat.combatants.forEach(seedCombatantPosition);
+}
+
+function seedCombatantPosition(combatant) {
   const tokenDoc = combatant?.token ?? canvas.tokens.get(combatant?.tokenId)?.document;
   if (!combatant?.tokenId || !tokenDoc) return;
 
@@ -636,28 +642,28 @@ function seedCurrentCombatantPosition(combat) {
   }
 }
 
-Hooks.on("deleteCombat", (combat, options, userId) => {
+Hooks.on("deleteCombat", async (combat, options, userId) => {
   if (game.settings.get("action-tracker", "debug")) {
     console.log("Action Tracker | Combat ended - resetting all icons");
   }
-  combat.combatants.forEach(c => {
+  await Promise.all(combat.combatants.map(c => {
     const token = c.token?.object ?? canvas.tokens.get(c.tokenId);
-    if (token?.document) resetActions(token);
+    if (token?.document) return resetActions(token);
     else if (game.settings.get("action-tracker", "debug")) {
       console.warn(`Action Tracker | No token found for combatant ${c.name} on combat end`);
     }
-  });
+  }));
   tokenMovementMap.clear();
   tokenLastKnownPosition.clear();
 });
 
-function resetActions(token) {
+async function resetActions(token) {
   const iconCount = game.settings.get("action-tracker", "iconCount");
   const flags = {};
   for (let i = 0; i < iconCount; i++) {
     flags[`action${i}`] = { used: false };
   }
-  token.document.update({ flags: { "action-tracker": flags } });
+  await token.document.update({ flags: { "action-tracker": flags } });
   tokenMovementMap.delete(token.document.id);
   if (game.settings.get("action-tracker", "debug")) {
     console.log(`Action Tracker | Reset icons for ${token.name}`);
@@ -698,6 +704,17 @@ async function trackTokenMovement(tokenDoc, totalFeet) {
 
   if (reachedThreshold) {
     await tokenDoc.setFlag("action-tracker", `action${moveIconIndex}.used`, true);
+    refreshTokenDisplays(tokenDoc);
+  }
+}
+
+function refreshTokenDisplays(tokenDoc) {
+  if (game.combat && ui.combat) ui.combat.render({ force: true });
+  if (canvas.hud?.token?.object?.document?.id === tokenDoc.id) {
+    canvas.hud.token.render({ force: true });
+  }
+  if (game.settings.get("action-tracker", "showOnSheet") !== "off" && tokenDoc.actor?.sheet?.rendered) {
+    tokenDoc.actor.sheet.render({ force: true });
   }
 }
 
