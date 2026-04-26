@@ -267,15 +267,6 @@ Hooks.on("preCreateToken", (tokenDoc, data, options, userId) => {
   tokenDoc.updateSource({ flags: { "action-tracker": flags } });
 });
 
-// Fallback: seed last-known position for out-of-turn moves that were never
-// initialised by updateCombat (opportunity attacks, lair actions, etc.).
-// Only sets if no entry exists, so it never overwrites a reliable turn-start value.
-Hooks.on("preUpdateToken", (tokenDoc, updates) => {
-  if ((updates.x !== undefined || updates.y !== undefined) && !tokenLastKnownPosition.has(tokenDoc.id)) {
-    tokenLastKnownPosition.set(tokenDoc.id, { x: tokenDoc.x, y: tokenDoc.y });
-  }
-});
-
 Hooks.on("updateToken", async (tokenDoc, updates, options, userId) => {
   if (updates.flags?.["action-tracker"]) {
     if (game.combat && ui.combat) ui.combat.render({ force: true });
@@ -289,7 +280,6 @@ Hooks.on("updateToken", async (tokenDoc, updates, options, userId) => {
 
   if (updates.x !== undefined || updates.y !== undefined) {
     const prev = tokenLastKnownPosition.get(tokenDoc.id);
-    // Always update to the new confirmed position
     tokenLastKnownPosition.set(tokenDoc.id, { x: tokenDoc.x, y: tokenDoc.y });
     if (prev) {
       const segDist = getSegmentDistance(prev.x, prev.y, tokenDoc.x, tokenDoc.y);
@@ -590,6 +580,10 @@ async function renderActorSheetHandler(sheet, html, data) {
   insertTarget.before(container);
 }
 
+Hooks.on("combatStart", (combat) => {
+  seedCurrentCombatantPosition(combat);
+});
+
 Hooks.on("updateCombat", (combat, update, options, userId) => {
   const resetTiming = game.settings.get("action-tracker", "resetTiming");
 
@@ -600,10 +594,7 @@ Hooks.on("updateCombat", (combat, update, options, userId) => {
   // Seed movement tracking whenever the turn changes so we have a reliable
   // starting position for the new combatant regardless of hook ordering.
   if (update.turn !== undefined) {
-    const newCombatant = combat.combatant;
-    if (newCombatant?.token) {
-      tokenLastKnownPosition.set(newCombatant.tokenId, { x: newCombatant.token.x, y: newCombatant.token.y });
-    }
+    seedCurrentCombatantPosition(combat);
   }
 
   if (resetTiming === "turnStart" && update.turn !== undefined) {
@@ -632,6 +623,18 @@ Hooks.on("updateCombat", (combat, update, options, userId) => {
     });
   }
 });
+
+function seedCurrentCombatantPosition(combat) {
+  const combatant = combat?.combatant;
+  const tokenDoc = combatant?.token ?? canvas.tokens.get(combatant?.tokenId)?.document;
+  if (!combatant?.tokenId || !tokenDoc) return;
+
+  tokenLastKnownPosition.set(combatant.tokenId, { x: tokenDoc.x, y: tokenDoc.y });
+
+  if (game.settings.get("action-tracker", "debug")) {
+    console.log(`Action Tracker | Seeded movement position for ${combatant.name}`);
+  }
+}
 
 Hooks.on("deleteCombat", (combat, options, userId) => {
   if (game.settings.get("action-tracker", "debug")) {
