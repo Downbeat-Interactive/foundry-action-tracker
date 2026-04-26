@@ -692,7 +692,11 @@ async function trackTokenMovement(tokenDoc, totalFeet) {
     console.log(`Action Tracker | Movement check: ${totalFeet.toFixed(1)}ft moved, threshold ${threshold}ft for ${tokenDoc.name}`);
   }
 
-  if (totalFeet > threshold) {
+  const reachedThreshold = setting === "any"
+    ? totalFeet > 0
+    : totalFeet + 0.001 >= threshold;
+
+  if (reachedThreshold) {
     await tokenDoc.setFlag("action-tracker", `action${moveIconIndex}.used`, true);
   }
 }
