@@ -574,7 +574,12 @@ async function renderActorSheetHandler(sheet, html, data) {
     container.appendChild(dotWrapper);
   }
 
-  hpSection.before(container);
+  // Walk up one level so the icons appear above the "HIT POINTS" label as well,
+  // not just above the bar inside the section.
+  const insertTarget = (hpSection.parentElement && hpSection.parentElement !== root)
+    ? hpSection.parentElement
+    : hpSection;
+  insertTarget.before(container);
 }
 
 Hooks.on("updateCombat", (combat, update, options, userId) => {
