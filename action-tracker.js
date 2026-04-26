@@ -1,8 +1,7 @@
-// Action Tracker Module for Foundry VTT v13, D&D 5e v4+
-// July 12, 2025 (updated for v13 AppV2 compatibility)
+// Action Tracker Module for Foundry VTT v14, D&D 5e v4+
 
 Hooks.once("init", () => {
-  console.log("Action Tracker | Initializing for Foundry v13, D&D 5e v4+");
+  console.log("Action Tracker | Initializing for Foundry v14, D&D 5e v4+");
 
   game.settings.register("action-tracker", "resetTiming", {
     name: game.i18n.localize("ACTION-TRACKER.ResetTiming"),
@@ -45,8 +44,8 @@ Hooks.once("init", () => {
     type: Boolean,
     default: true,
     onChange: () => {
-      if (game.combat && ui.combat) ui.combat.render(true);
-      if (ui.controls.hud?.token) ui.controls.hud.token.render(true);
+      if (game.combat && ui.combat) ui.combat.render({ force: true });
+      if (canvas.hud?.token) canvas.hud.token.render({ force: true });
     }
   });
 
@@ -67,7 +66,7 @@ Hooks.once("init", () => {
     type: Boolean,
     default: true,
     onChange: () => {
-      if (game.combat && ui.combat) ui.combat.render(true);
+      if (game.combat && ui.combat) ui.combat.render({ force: true });
     }
   });
 
@@ -77,7 +76,7 @@ Hooks.once("init", () => {
     scope: "world",
     config: true,
     type: Boolean,
-    default: false // Off by default for production
+    default: false
   });
 
   const defaultIcons = [
@@ -90,7 +89,7 @@ Hooks.once("init", () => {
 
   for (let i = 0; i < 5; i++) {
     const def = defaultIcons[i] || { image: "icons/svg/mystery-man.svg", sound: "sounds/doors/wood/lock.ogg", text: `Action ${i + 1}`, tint: "#ffffff" };
-    
+
     game.settings.register("action-tracker", `icon${i}Image`, {
       name: game.i18n.localize(`ACTION-TRACKER.Icon${i}Image`),
       hint: game.i18n.localize(`ACTION-TRACKER.Icon${i}ImageHint`),
@@ -128,13 +127,15 @@ Hooks.once("init", () => {
       type: String,
       default: def.tint,
       onChange: () => {
-        if (game.combat && ui.combat) ui.combat.render(true);
-        if (ui.controls.hud?.token) ui.controls.hud.token.render(true);
+        if (game.combat && ui.combat) ui.combat.render({ force: true });
+        if (canvas.hud?.token) canvas.hud.token.render({ force: true });
       }
     });
   }
 
   Hooks.on("renderSettingsConfig", (app, html, data) => {
+    const root = html instanceof HTMLElement ? html : html[0];
+
     const separators = [
       { before: "action-tracker.icon0Image", title: game.i18n.localize("ACTION-TRACKER.Icon1Settings") },
       { before: "action-tracker.icon1Image", title: game.i18n.localize("ACTION-TRACKER.Icon2Settings") },
@@ -144,22 +145,22 @@ Hooks.once("init", () => {
     ];
 
     separators.forEach(sep => {
-      const setting = html.find(`[name="${sep.before}"]`).closest(".form-group");
-      if (setting.length) {
-        setting.before(`<h2 style="border-bottom: 1px solid #999; margin: 10px 0; padding-bottom: 5px;">${sep.title}</h2>`);
+      const setting = root.querySelector(`[name="${sep.before}"]`)?.closest(".form-group");
+      if (setting) {
+        const h2 = document.createElement("h2");
+        h2.style.cssText = "border-bottom: 1px solid #999; margin: 10px 0; padding-bottom: 5px;";
+        h2.textContent = sep.title;
+        setting.before(h2);
       }
     });
 
     for (let i = 0; i < 5; i++) {
-      const tintInput = html.find(`[name="action-tracker.icon${i}Tint"]`);
-      if (tintInput.length) {
+      const tintInput = root.querySelector(`[name="action-tracker.icon${i}Tint"]`);
+      if (tintInput) {
         const value = game.settings.get("action-tracker", `icon${i}Tint`);
-        tintInput.replaceWith(`
-          <color-picker name="action-tracker.icon${i}Tint" value="${value}">
-            <input type="text" placeholder="">
-            <input type="color">
-          </color-picker>
-        `);
+        const wrapper = document.createElement("span");
+        wrapper.innerHTML = `<color-picker name="action-tracker.icon${i}Tint" value="${value}"><input type="text" placeholder=""><input type="color"></color-picker>`;
+        tintInput.replaceWith(wrapper.firstElementChild);
       }
     }
   });
@@ -174,6 +175,12 @@ Hooks.once("init", () => {
     }
   });
 });
+
+// Play a sound in a way compatible with both v13 and v14
+function playSound(src) {
+  const Helper = foundry.audio?.AudioHelper ?? AudioHelper;
+  Helper?.play({ src, volume: 0.5 });
+}
 
 // SVG caching for performance
 const svgCache = new Map();
@@ -215,16 +222,17 @@ Hooks.on("preCreateToken", (tokenDoc, data, options, userId) => {
   tokenDoc.updateSource({ flags: { "action-tracker": flags } });
 });
 
-Hooks.on('updateToken', (tokenDoc, updates) => {
-  if (updates.flags?.['action-tracker'] && game.combat && ui.combat) {
-    ui.combat.render(true);
-    if (ui.controls.hud?.token?.object?.document === tokenDoc) {
-      ui.controls.hud.token.render(true);
+Hooks.on("updateToken", (tokenDoc, updates) => {
+  if (updates.flags?.["action-tracker"] && game.combat && ui.combat) {
+    ui.combat.render({ force: true });
+    if (canvas.hud?.token?.object?.document === tokenDoc) {
+      canvas.hud.token.render({ force: true });
     }
   }
 });
 
 Hooks.on("renderTokenHUD", async (hud, html, data) => {
+  const root = html instanceof HTMLElement ? html : html[0];
   const token = hud.object;
   if (game.settings.get("action-tracker", "debug")) {
     console.log(`Action Tracker | Rendering HUD for ${token.name}`);
@@ -281,9 +289,9 @@ Hooks.on("renderTokenHUD", async (hud, html, data) => {
         });
         svgElement.style.borderColor = newColor;
       }
-      if (enableSounds) AudioHelper.play({ src: sound, volume: 0.5 });
-      if (game.combat && ui.combat) ui.combat.render(true);
-      if (ui.controls.hud?.token?.object === token) ui.controls.hud.token.render(true);
+      if (enableSounds) playSound(sound);
+      if (game.combat && ui.combat) ui.combat.render({ force: true });
+      if (canvas.hud?.token?.object === token) canvas.hud.token.render({ force: true });
     });
 
     dotWrapper.addEventListener("mouseover", () => {
@@ -296,7 +304,7 @@ Hooks.on("renderTokenHUD", async (hud, html, data) => {
     actionBar.appendChild(dotWrapper);
   }
 
-  const middleCol = $(html).find(".col.middle")[0];
+  const middleCol = root.querySelector(".col.middle");
   if (middleCol) {
     middleCol.prepend(actionBar);
     if (game.settings.get("action-tracker", "debug")) {
@@ -306,7 +314,7 @@ Hooks.on("renderTokenHUD", async (hud, html, data) => {
     if (game.settings.get("action-tracker", "debug")) {
       console.warn(`Action Tracker | Middle column not found, appending to root`);
     }
-    html.prepend(actionBar);  // Note: html is HTMLElement, so no [0]
+    root.prepend(actionBar);
   }
 });
 
@@ -320,7 +328,7 @@ function getIconState(combatant, actionIndex) {
   }
   if (!tokenDoc) {
     if (game.settings.get("action-tracker", "debug")) {
-      console.warn(`Action Tracker | No token document for combatant ${combatant.id || combatant.name || 'unknown'}`);
+      console.warn(`Action Tracker | No token document for combatant ${combatant.id || combatant.name || "unknown"}`);
     }
     return { used: false };
   }
@@ -332,7 +340,9 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
     console.log("Action Tracker | Rendering Combat Tracker");
   }
 
-  if (!data?.combat) {
+  // Support both AppV1 context (data.combat) and AppV2 (tracker.viewed)
+  const combat = data?.combat ?? tracker.viewed ?? game.combat;
+  if (!combat) {
     if (game.settings.get("action-tracker", "debug")) {
       console.log("Action Tracker | No active combat - skipping tracker icons");
     }
@@ -347,36 +357,37 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
     return;
   }
 
+  const root = html instanceof HTMLElement ? html : html[0];
   const iconCount = game.settings.get("action-tracker", "iconCount");
   const removeColor = game.settings.get("action-tracker", "removeColorWhenUsed");
   const enableSounds = game.settings.get("action-tracker", "enableSounds");
 
-  for (const combatant of data.combat.combatants) {
+  for (const combatant of combat.combatants) {
     if (!combatant?.tokenId) {
       if (game.settings.get("action-tracker", "debug")) {
-        console.warn(`Action Tracker | Combatant ${combatant?.name || 'unknown'} has no tokenId - skipping`);
+        console.warn(`Action Tracker | Combatant ${combatant?.name || "unknown"} has no tokenId - skipping`);
       }
       continue;
     }
 
-    const combatantLi = $(html).find(`li.combatant[data-combatant-id="${combatant.id}"]`);
-    if (!combatantLi.length) {
+    const combatantLi = root.querySelector(`li.combatant[data-combatant-id="${combatant.id}"]`);
+    if (!combatantLi) {
       if (game.settings.get("action-tracker", "debug")) {
         console.warn(`Action Tracker | No LI found for combatant ${combatant.id}`);
       }
       continue;
     }
 
-    const nameElement = combatantLi.find(".token-name");
-    if (!nameElement.length) {
+    const nameElement = combatantLi.querySelector(".token-name") ?? combatantLi.querySelector(".combatant-name");
+    if (!nameElement) {
       if (game.settings.get("action-tracker", "debug")) {
         console.warn(`Action Tracker | No .token-name found for combatant ${combatant.id}`);
       }
       continue;
     }
 
-    const existingIconBar = combatantLi.find(".action-tracker-icons");
-    if (existingIconBar.length) existingIconBar.remove();
+    const existingIconBar = combatantLi.querySelector(".action-tracker-icons");
+    if (existingIconBar) existingIconBar.remove();
 
     const iconBar = document.createElement("div");
     iconBar.className = "action-tracker-icons";
@@ -401,7 +412,7 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
       wrapper.addEventListener("click", async (event) => {
         event.stopPropagation();
         event.preventDefault();
-        const tokenDoc = combatant.token || canvas.tokens.get(combatant.tokenId)?.document;
+        const tokenDoc = combatant.token ?? canvas.tokens.get(combatant.tokenId)?.document;
         if (!tokenDoc) {
           if (game.settings.get("action-tracker", "debug")) {
             console.warn(`Action Tracker | No token document for ${combatant.name || combatant.id} on click`);
@@ -421,8 +432,8 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
           });
           svgElement.style.borderColor = newColor;
         }
-        if (enableSounds) AudioHelper.play({ src: sound, volume: 0.5 });
-        if (game.combat && ui.combat) ui.combat.render(true);
+        if (enableSounds) playSound(sound);
+        if (game.combat && ui.combat) ui.combat.render({ force: true });
       });
 
       iconBar.appendChild(wrapper);
@@ -434,31 +445,31 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
 
 Hooks.on("updateCombat", (combat, update, options, userId) => {
   const resetTiming = game.settings.get("action-tracker", "resetTiming");
-  const currentToken = combat.combatant?.token?.object;
 
   if (game.settings.get("action-tracker", "debug")) {
-    console.log(`Action Tracker | updateCombat: turn: ${update.turn}, round: ${update.round}, currentToken: ${currentToken?.name || 'none'}`);
-  }
-
-  if (!currentToken || !currentToken.document) {
-    if (game.settings.get("action-tracker", "debug")) {
-      console.warn("Action Tracker | No valid current token for reset");
-    }
-    return;
+    console.log(`Action Tracker | updateCombat: turn: ${update.turn}, round: ${update.round}`);
   }
 
   if (resetTiming === "turnStart" && update.turn !== undefined) {
-    resetActions(currentToken);
-  } else if (resetTiming === "turnEnd" && update.turn !== undefined && combat.previous.turn !== undefined) {
-    const previousToken = combat.previous.token?.object;
-    if (previousToken && previousToken.document) resetActions(previousToken);
+    const currentToken = combat.combatant?.token?.object;
+    if (currentToken?.document) resetActions(currentToken);
+    else if (game.settings.get("action-tracker", "debug")) {
+      console.warn("Action Tracker | No valid current token for turnStart reset");
+    }
+  } else if (resetTiming === "turnEnd" && update.turn !== undefined) {
+    // Resolve the previous combatant via combat.turns (sorted initiative order)
+    const prevTurnIndex = combat.previous?.turn;
+    const previousCombatant = prevTurnIndex !== undefined ? combat.turns?.[prevTurnIndex] : null;
+    const previousToken = previousCombatant?.token?.object
+      ?? (previousCombatant ? canvas.tokens.get(previousCombatant.tokenId) : null);
+    if (previousToken?.document) resetActions(previousToken);
     else if (game.settings.get("action-tracker", "debug")) {
       console.warn("Action Tracker | No valid previous token for turnEnd reset");
     }
   } else if (resetTiming === "roundEnd" && update.round !== undefined && update.turn === 0) {
     combat.combatants.forEach(c => {
-      const token = c.token?.object;
-      if (token && token.document) resetActions(token);
+      const token = c.token?.object ?? canvas.tokens.get(c.tokenId);
+      if (token?.document) resetActions(token);
       else if (game.settings.get("action-tracker", "debug")) {
         console.warn(`Action Tracker | Invalid token in combatant: ${c.name}`);
       }
@@ -471,8 +482,8 @@ Hooks.on("deleteCombat", (combat, options, userId) => {
     console.log("Action Tracker | Combat ended - resetting all icons");
   }
   combat.combatants.forEach(c => {
-    const token = canvas.tokens.get(c.tokenId);
-    if (token && token.document) resetActions(token);
+    const token = c.token?.object ?? canvas.tokens.get(c.tokenId);
+    if (token?.document) resetActions(token);
     else if (game.settings.get("action-tracker", "debug")) {
       console.warn(`Action Tracker | No token found for combatant ${c.name} on combat end`);
     }
@@ -489,8 +500,8 @@ function resetActions(token) {
   if (game.settings.get("action-tracker", "debug")) {
     console.log(`Action Tracker | Reset icons for ${token.name}`);
   }
-  if (game.combat && ui.combat) ui.combat.render(true);
-  if (ui.controls.hud?.token?.object === token) ui.controls.hud.token.render(true);
+  if (game.combat && ui.combat) ui.combat.render({ force: true });
+  if (canvas.hud?.token?.object === token) canvas.hud.token.render({ force: true });
 }
 
 function hueFromHex(hex) {
