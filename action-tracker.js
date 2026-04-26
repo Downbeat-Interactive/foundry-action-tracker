@@ -70,6 +70,15 @@ Hooks.once("init", () => {
     }
   });
 
+  game.settings.register("action-tracker", "autoMarkActions", {
+    name: game.i18n.localize("ACTION-TRACKER.AutoMarkActions"),
+    hint: game.i18n.localize("ACTION-TRACKER.AutoMarkActionsHint"),
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true
+  });
+
   game.settings.register("action-tracker", "debug", {
     name: game.i18n.localize("ACTION-TRACKER.Debug"),
     hint: game.i18n.localize("ACTION-TRACKER.DebugHint"),
@@ -503,6 +512,69 @@ function resetActions(token) {
   if (game.combat && ui.combat) ui.combat.render({ force: true });
   if (canvas.hud?.token?.object === token) canvas.hud.token.render({ force: true });
 }
+
+// Map DnD5e activation types to icon indices (matches default icon order)
+function getIconIndexForActivationType(type) {
+  switch (type) {
+    case "action": return 0;
+    case "bonus": return 1;
+    case "reaction": return 2;
+    default: return -1;
+  }
+}
+
+// Find the TokenDocument for an actor, preferring the one in active combat
+function getTokenDocForActor(actor) {
+  if (game.combat) {
+    const combatant = game.combat.combatants.find(c => c.actor === actor);
+    if (combatant?.token) return combatant.token;
+  }
+  return actor.getActiveTokens(false, false)[0]?.document ?? null;
+}
+
+async function autoMarkActionForToken(tokenDoc, activationType) {
+  if (!game.settings.get("action-tracker", "autoMarkActions")) return;
+  const inCombat = game.combat?.combatants.some(c => c.tokenId === tokenDoc.id);
+  if (!inCombat) return;
+  const iconIndex = getIconIndexForActivationType(activationType);
+  if (iconIndex < 0) return;
+  const iconCount = game.settings.get("action-tracker", "iconCount");
+  if (iconIndex >= iconCount) return;
+  const alreadyUsed = tokenDoc.getFlag("action-tracker", `action${iconIndex}`)?.used;
+  if (alreadyUsed) return;
+  if (game.settings.get("action-tracker", "debug")) {
+    console.log(`Action Tracker | Auto-marking ${activationType} (icon ${iconIndex}) for ${tokenDoc.name}`);
+  }
+  await tokenDoc.setFlag("action-tracker", `action${iconIndex}.used`, true);
+}
+
+// Register auto-marking hooks after all modules are loaded
+Hooks.once("ready", () => {
+  if (game.modules.get("midi-qol")?.active) {
+    if (game.settings.get("action-tracker", "debug")) {
+      console.log("Action Tracker | MIDI-QOL detected - using midi-qol.RollComplete for auto-marking");
+    }
+    Hooks.on("midi-qol.RollComplete", (workflow) => {
+      // workflow.token may be a Token object or a TokenDocument
+      const tokenDoc = workflow.token?.document ?? workflow.token;
+      if (!tokenDoc) return;
+      const activationType = workflow.activity?.activation?.type ?? workflow.item?.system?.activation?.type;
+      autoMarkActionForToken(tokenDoc, activationType);
+    });
+  } else {
+    if (game.settings.get("action-tracker", "debug")) {
+      console.log("Action Tracker | Using dnd5e.postUseActivity for auto-marking");
+    }
+    Hooks.on("dnd5e.postUseActivity", (activity, usageConfig, results) => {
+      const actor = activity.actor;
+      if (!actor) return;
+      const activationType = activity.activation?.type ?? activity.item?.system?.activation?.type;
+      const tokenDoc = getTokenDocForActor(actor);
+      if (!tokenDoc) return;
+      autoMarkActionForToken(tokenDoc, activationType);
+    });
+  }
+});
 
 function hueFromHex(hex) {
   const r = parseInt(hex.slice(1, 3), 16) / 255;

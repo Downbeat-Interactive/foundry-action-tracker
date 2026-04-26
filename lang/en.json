@@ -57,6 +57,8 @@
   "ACTION-TRACKER.Icon3Settings": "Icon 3 Settings",
   "ACTION-TRACKER.Icon4Settings": "Icon 4 Settings",
   "ACTION-TRACKER.Icon5Settings": "Icon 5 Settings",
+  "ACTION-TRACKER.AutoMarkActions": "Auto-Mark Actions",
+  "ACTION-TRACKER.AutoMarkActionsHint": "Automatically mark the Action, Bonus Action, or Reaction icon when an item is used in combat (requires D&D 5e v4+ and optionally MIDI-QOL).",
   "ACTION-TRACKER.Debug": "Enable Debug Logging",
   "ACTION-TRACKER.DebugHint": "Log detailed information to the console for troubleshooting. Disable for normal use."
 }
