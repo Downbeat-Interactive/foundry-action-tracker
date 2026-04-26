@@ -226,10 +226,9 @@ const svgCache = new Map();
 // Cumulative feet moved per token this turn, keyed by TokenDocument id
 const tokenMovementMap = new Map();
 
-// Previous pixel position before a move, keyed by TokenDocument id
-// Stored here instead of the options object because Foundry v14 does not
-// guarantee the same options reference is passed to both preUpdateToken and updateToken.
-const tokenPrevPosition = new Map();
+// Last confirmed pixel position per token, keyed by TokenDocument id.
+// Initialised at turn start (reliable) and updated on every move.
+const tokenLastKnownPosition = new Map();
 async function getSvgElement(image, tint, used, removeColor, size = "20px") {
   if (!svgCache.has(image)) {
     try {
@@ -268,10 +267,12 @@ Hooks.on("preCreateToken", (tokenDoc, data, options, userId) => {
   tokenDoc.updateSource({ flags: { "action-tracker": flags } });
 });
 
-// Capture pre-move position before Foundry applies the update
-Hooks.on("preUpdateToken", (tokenDoc, updates, options, userId) => {
-  if (updates.x !== undefined || updates.y !== undefined) {
-    tokenPrevPosition.set(tokenDoc.id, { x: tokenDoc.x, y: tokenDoc.y });
+// Fallback: seed last-known position for out-of-turn moves that were never
+// initialised by updateCombat (opportunity attacks, lair actions, etc.).
+// Only sets if no entry exists, so it never overwrites a reliable turn-start value.
+Hooks.on("preUpdateToken", (tokenDoc, updates) => {
+  if ((updates.x !== undefined || updates.y !== undefined) && !tokenLastKnownPosition.has(tokenDoc.id)) {
+    tokenLastKnownPosition.set(tokenDoc.id, { x: tokenDoc.x, y: tokenDoc.y });
   }
 });
 
@@ -285,10 +286,17 @@ Hooks.on("updateToken", async (tokenDoc, updates, options, userId) => {
       tokenDoc.actor.sheet.render({ force: true });
     }
   }
-  if (tokenPrevPosition.has(tokenDoc.id)) {
-    const prev = tokenPrevPosition.get(tokenDoc.id);
-    tokenPrevPosition.delete(tokenDoc.id);
-    await trackTokenMovement(tokenDoc, prev.x, prev.y);
+
+  if (updates.x !== undefined || updates.y !== undefined) {
+    const prev = tokenLastKnownPosition.get(tokenDoc.id);
+    // Always update to the new confirmed position
+    tokenLastKnownPosition.set(tokenDoc.id, { x: tokenDoc.x, y: tokenDoc.y });
+    if (prev) {
+      const segDist = getSegmentDistance(prev.x, prev.y, tokenDoc.x, tokenDoc.y);
+      const total = (tokenMovementMap.get(tokenDoc.id) ?? 0) + segDist;
+      tokenMovementMap.set(tokenDoc.id, total);
+      await trackTokenMovement(tokenDoc, total);
+    }
   }
 });
 
@@ -589,6 +597,15 @@ Hooks.on("updateCombat", (combat, update, options, userId) => {
     console.log(`Action Tracker | updateCombat: turn: ${update.turn}, round: ${update.round}`);
   }
 
+  // Seed movement tracking whenever the turn changes so we have a reliable
+  // starting position for the new combatant regardless of hook ordering.
+  if (update.turn !== undefined) {
+    const newCombatant = combat.combatant;
+    if (newCombatant?.token) {
+      tokenLastKnownPosition.set(newCombatant.tokenId, { x: newCombatant.token.x, y: newCombatant.token.y });
+    }
+  }
+
   if (resetTiming === "turnStart" && update.turn !== undefined) {
     const currentToken = combat.combatant?.token?.object;
     if (currentToken?.document) resetActions(currentToken);
@@ -628,7 +645,7 @@ Hooks.on("deleteCombat", (combat, options, userId) => {
     }
   });
   tokenMovementMap.clear();
-  tokenPrevPosition.clear();
+  tokenLastKnownPosition.clear();
 });
 
 function resetActions(token) {
@@ -653,7 +670,7 @@ function getSegmentDistance(prevX, prevY, newX, newY) {
   return (pixels / canvas.grid.size) * canvas.scene.grid.distance;
 }
 
-async function trackTokenMovement(tokenDoc, prevX, prevY) {
+async function trackTokenMovement(tokenDoc, totalFeet) {
   const setting = game.settings.get("action-tracker", "autoMarkMovement");
   if (setting === "off") return;
   if (!game.combat) return;
@@ -662,21 +679,17 @@ async function trackTokenMovement(tokenDoc, prevX, prevY) {
   const moveIconIndex = 3;
   if (moveIconIndex >= game.settings.get("action-tracker", "iconCount")) return;
 
-  const segDist = getSegmentDistance(prevX, prevY, tokenDoc.x, tokenDoc.y);
-
-  const total = (tokenMovementMap.get(tokenDoc.id) ?? 0) + segDist;
-  tokenMovementMap.set(tokenDoc.id, total);
-
   const alreadyUsed = tokenDoc.getFlag("action-tracker", `action${moveIconIndex}`)?.used;
   if (alreadyUsed) return;
 
   const walkSpeed = tokenDoc.actor?.system?.attributes?.movement?.walk ?? 30;
   const threshold = setting === "any" ? 0 : setting === "half" ? walkSpeed / 2 : walkSpeed;
 
-  if (total > threshold) {
-    if (game.settings.get("action-tracker", "debug")) {
-      console.log(`Action Tracker | Auto-marking movement (${total.toFixed(1)}ft / threshold ${threshold}ft) for ${tokenDoc.name}`);
-    }
+  if (game.settings.get("action-tracker", "debug")) {
+    console.log(`Action Tracker | Movement check: ${totalFeet.toFixed(1)}ft moved, threshold ${threshold}ft for ${tokenDoc.name}`);
+  }
+
+  if (totalFeet > threshold) {
     await tokenDoc.setFlag("action-tracker", `action${moveIconIndex}.used`, true);
   }
 }
