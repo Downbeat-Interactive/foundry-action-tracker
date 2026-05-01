@@ -297,7 +297,10 @@ async function getIconElement(image, tint, used, removeColor, size = "20px") {
 }
 
 function getWalkSpeed(tokenDoc) {
-  const walkSpeed = Number(tokenDoc.actor?.system?.attributes?.movement?.walk);
+  const walkSpeedValue = tokenDoc.actor?.system?.attributes?.movement?.walk;
+  if (walkSpeedValue === null || walkSpeedValue === undefined) return null;
+
+  const walkSpeed = Number(walkSpeedValue);
   return Number.isFinite(walkSpeed) && walkSpeed > 0 ? walkSpeed : null;
 }
 
@@ -326,6 +329,10 @@ function createMovementLeftElement(tokenDoc) {
 
 function getCombatTokenIds(combat = game.combat) {
   return new Set(combat?.combatants?.map(c => c.tokenId).filter(Boolean) ?? []);
+}
+
+function getTokenDocFromCombatant(combatant) {
+  return combatant?.token ?? canvas.tokens.get(combatant?.tokenId)?.document;
 }
 
 function appendMovementLeft(wrapper, iconIndex, tokenDoc, combatTokenIds) {
@@ -537,7 +544,7 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
 
       const svgElement = await getIconElement(image, tint, used, removeColor, "16px");
       // Moved before click handler registration so appendMovementLeft can access it.
-      const tokenDoc = combatant.token ?? canvas.tokens.get(combatant.tokenId)?.document;
+      const tokenDoc = getTokenDocFromCombatant(combatant);
 
       const wrapper = document.createElement("div");
       wrapper.className = "action-dot-wrapper-tracker";
