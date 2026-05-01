@@ -231,7 +231,9 @@ const tokenMovementMap = new Map();
 const tokenLastKnownPosition = new Map();
 
 function isSvgImage(image) {
-  return String(image ?? "").split(/[?#]/)[0].toLowerCase().endsWith(".svg");
+  const path = String(image ?? "").split(/[?#]/)[0].toLowerCase();
+  const filename = path.substring(path.lastIndexOf("/") + 1);
+  return filename.split(".").pop() === "svg";
 }
 
 function createFallbackSvg(tint) {
@@ -247,9 +249,11 @@ function createFallbackSvg(tint) {
 function applyIconColor(icon, tint, used, removeColor) {
   const color = used && removeColor ? "#ffffff" : tint;
   if (icon.style) icon.style.borderColor = color;
-  icon.querySelectorAll?.("path, circle, rect").forEach(el => {
-    el.setAttribute("fill", color);
-  });
+  if (typeof icon.querySelectorAll === "function") {
+    icon.querySelectorAll("path, circle, rect").forEach(el => {
+      el.setAttribute("fill", color);
+    });
+  }
 }
 
 async function getIconElement(image, tint, used, removeColor, size = "20px") {
