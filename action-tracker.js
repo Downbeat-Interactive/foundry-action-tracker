@@ -229,7 +229,7 @@ const tokenMovementMap = new Map();
 // Last confirmed pixel position per token, keyed by TokenDocument id.
 // Initialised at turn start (reliable) and updated on every move.
 const tokenLastKnownPosition = new Map();
-const MOVEMENT_ACTION_ICON_INDEX = 3;
+const MOVEMENT_ICON_ZERO_BASED_INDEX = 3;
 
 function isSvgImage(image) {
   const cleanedPath = String(image ?? "").split(/[?#]/)[0].toLowerCase();
@@ -301,8 +301,7 @@ function getWalkSpeed(tokenDoc) {
 }
 
 function formatMovementLeft(distance) {
-  const rounded = Math.round(distance * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  return (Math.round(distance * 10) / 10).toFixed(1).replace(/\.0$/, "");
 }
 
 function getMovementUnit() {
@@ -328,7 +327,7 @@ function getCombatTokenIds(combat = game.combat) {
 }
 
 function appendMovementLeft(wrapper, iconIndex, tokenDoc, combatTokenIds) {
-  if (iconIndex !== MOVEMENT_ACTION_ICON_INDEX || !combatTokenIds.has(tokenDoc.id)) return;
+  if (iconIndex !== MOVEMENT_ICON_ZERO_BASED_INDEX || !combatTokenIds.has(tokenDoc.id)) return;
 
   const overlay = createMovementLeftElement(tokenDoc);
   if (overlay) wrapper.appendChild(overlay);
@@ -535,6 +534,7 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
       if (!tint.match(/^#[0-9A-Fa-f]{6}$/)) tint = "#ffffff";
 
       const svgElement = await getIconElement(image, tint, used, removeColor, "16px");
+      // Needed before click handling so the movement overlay can use this token.
       const tokenDoc = combatant.token ?? canvas.tokens.get(combatant.tokenId)?.document;
 
       const wrapper = document.createElement("div");
@@ -760,7 +760,7 @@ async function trackTokenMovement(tokenDoc, totalFeet) {
   if (!game.combat) return;
   if (!game.combat.combatants.some(c => c.tokenId === tokenDoc.id)) return;
 
-  const moveIconIndex = MOVEMENT_ACTION_ICON_INDEX;
+  const moveIconIndex = MOVEMENT_ICON_ZERO_BASED_INDEX;
   if (moveIconIndex >= game.settings.get("action-tracker", "iconCount")) return;
 
   const alreadyUsed = tokenDoc.getFlag("action-tracker", `action${moveIconIndex}`)?.used;
