@@ -51,7 +51,7 @@
   border: 1px solid; /* Tint set inline, thinner for tracker */
   border-radius: 2px;
   position: absolute;
-  top: 0; /* Pin SVG to top, leaving space below */
+  top: 0; /* Pin icon to top, leaving space below */
 }
 
 .action-tracker-icons :is(svg, img).used {

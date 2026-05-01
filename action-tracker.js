@@ -231,10 +231,10 @@ const tokenMovementMap = new Map();
 const tokenLastKnownPosition = new Map();
 
 function isSvgImage(image) {
-  const path = String(image ?? "").split(/[?#]/)[0].toLowerCase();
-  const filename = path.substring(path.lastIndexOf("/") + 1);
-  if (!filename) return false;
-  const extension = filename.split(".").pop();
+  const pathWithoutQuery = String(image ?? "").split(/[?#]/)[0].toLowerCase();
+  const filenameSegment = pathWithoutQuery.substring(pathWithoutQuery.lastIndexOf("/") + 1);
+  if (!filenameSegment || !filenameSegment.includes(".")) return false;
+  const extension = filenameSegment.split(".").pop();
   return extension === "svg";
 }
 
