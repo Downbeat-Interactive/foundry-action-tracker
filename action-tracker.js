@@ -303,7 +303,7 @@ function getWalkSpeed(tokenDoc) {
 
 function formatMovementLeft(distance) {
   const rounded = Math.round(distance * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  return String(Number.isInteger(rounded) ? rounded : rounded.toFixed(1));
 }
 
 function getMovementUnit() {
