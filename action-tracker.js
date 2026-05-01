@@ -233,9 +233,8 @@ const tokenLastKnownPosition = new Map();
 function isSvgImage(image) {
   const pathWithoutQuery = String(image ?? "").split(/[?#]/)[0].toLowerCase();
   const filenameSegment = pathWithoutQuery.substring(pathWithoutQuery.lastIndexOf("/") + 1);
-  if (!filenameSegment || !filenameSegment.includes(".")) return false;
-  const extension = filenameSegment.split(".").pop();
-  return extension === "svg";
+  const extensionMatch = filenameSegment.match(/\.([^.]+)$/);
+  return extensionMatch?.[1] === "svg";
 }
 
 function createFallbackSvg(tint) {
