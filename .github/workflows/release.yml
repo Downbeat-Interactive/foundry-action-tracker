@@ -73,16 +73,8 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$RELEASE_TAG" "dist/${{ env.PACKAGE_TYPE }}.json" "${{ env.PACKAGE_TYPE }}.zip" --clobber
 
-      - name: Ensure Foundry API key is configured
-        env:
-          FOUNDRY_KEY: ${{ secrets.FOUNDRY_KEY }}
-        run: |
-          if [ -z "$FOUNDRY_KEY" ]; then
-            echo "Error: FOUNDRY_KEY secret is not configured"
-            exit 1
-          fi
-
       - name: Publish release to Foundry
+        if: ${{ secrets.FOUNDRY_KEY != '' }}
         env:
           FOUNDRY_KEY: ${{ secrets.FOUNDRY_KEY }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
