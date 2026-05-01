@@ -229,7 +229,48 @@ const tokenMovementMap = new Map();
 // Last confirmed pixel position per token, keyed by TokenDocument id.
 // Initialised at turn start (reliable) and updated on every move.
 const tokenLastKnownPosition = new Map();
-async function getSvgElement(image, tint, used, removeColor, size = "20px") {
+// Icon 4 in settings; icon arrays are zero-based.
+const MOVEMENT_ICON_INDEX = 3;
+
+function isSvgImage(image) {
+  const cleanedPath = String(image ?? "").split(/[?#]/)[0].toLowerCase();
+  const filenameSegment = cleanedPath.substring(cleanedPath.lastIndexOf("/") + 1);
+  const extensionMatch = filenameSegment.match(/\.([^.]+)$/);
+  return extensionMatch?.[1] === "svg";
+}
+
+function createFallbackSvg(tint) {
+  const fallback = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect.setAttribute("width", "16");
+  rect.setAttribute("height", "16");
+  rect.setAttribute("fill", tint);
+  fallback.appendChild(rect);
+  return fallback;
+}
+
+function applyIconColor(icon, tint, used, removeColor) {
+  const color = used && removeColor ? "#ffffff" : tint;
+  if (icon.style) icon.style.borderColor = color;
+  if (typeof icon.querySelectorAll === "function") {
+    icon.querySelectorAll("path, circle, rect").forEach(el => {
+      el.setAttribute("fill", color);
+    });
+  }
+}
+
+async function getIconElement(image, tint, used, removeColor, size = "20px") {
+  if (!isSvgImage(image)) {
+    const img = document.createElement("img");
+    img.src = image;
+    img.alt = "";
+    img.setAttribute("width", size);
+    img.setAttribute("height", size);
+    img.classList.toggle("used", used);
+    applyIconColor(img, tint, used, removeColor);
+    return img;
+  }
+
   if (!svgCache.has(image)) {
     try {
       const response = await fetch(image);
@@ -237,25 +278,68 @@ async function getSvgElement(image, tint, used, removeColor, size = "20px") {
       const svgText = await response.text();
       const parser = new DOMParser();
       const svgDoc = parser.parseFromString(svgText, "image/svg+xml");
-      svgCache.set(image, svgDoc.documentElement.cloneNode(true));
+      const svg = svgDoc.documentElement;
+      if (svg?.tagName?.toLowerCase() !== "svg") throw new Error("Invalid SVG file format");
+      svgCache.set(image, svg.cloneNode(true));
     } catch (e) {
       if (game.settings.get("action-tracker", "debug")) {
-        console.warn(`Action Tracker | Failed to load SVG (${image}) - using fallback`, e);
+        console.warn(`Action Tracker | Failed to load icon (${image}) - using fallback`, e);
       }
-      const fallback = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      fallback.innerHTML = `<rect width="16" height="16" fill="${tint}" />`;
-      svgCache.set(image, fallback);
+      svgCache.set(image, createFallbackSvg(tint));
     }
   }
-  const svg = svgCache.get(image).cloneNode(true);
-  svg.setAttribute("width", size);
-  svg.setAttribute("height", size);
-  svg.classList.toggle("used", used);
-  svg.style.borderColor = used && removeColor ? "#ffffff" : tint;
-  svg.querySelectorAll("path, circle, rect").forEach(el => {
-    el.setAttribute("fill", used && removeColor ? "#ffffff" : tint);
-  });
-  return svg;
+  const icon = svgCache.get(image).cloneNode(true);
+  icon.setAttribute("width", size);
+  icon.setAttribute("height", size);
+  icon.classList.toggle("used", used);
+  applyIconColor(icon, tint, used, removeColor);
+  return icon;
+}
+
+function getWalkSpeed(tokenDoc) {
+  const walkSpeedValue = tokenDoc.actor?.system?.attributes?.movement?.walk;
+  if (walkSpeedValue === null || walkSpeedValue === undefined) return null;
+
+  const walkSpeed = Number(walkSpeedValue);
+  return Number.isFinite(walkSpeed) && walkSpeed > 0 ? walkSpeed : null;
+}
+
+function formatMovementLeft(distance) {
+  const rounded = Math.round(distance * 10) / 10;
+  return String(Number.isInteger(rounded) ? rounded : rounded.toFixed(1));
+}
+
+function getMovementUnit() {
+  return canvas.scene?.grid?.units || "ft";
+}
+
+function createMovementLeftElement(tokenDoc) {
+  const walkSpeed = getWalkSpeed(tokenDoc);
+  if (walkSpeed === null) return null;
+
+  const moved = tokenMovementMap.get(tokenDoc.id) ?? 0;
+  const remaining = Math.max(walkSpeed - moved, 0);
+  const formattedRemaining = formatMovementLeft(remaining);
+  const overlay = document.createElement("span");
+  overlay.className = "action-movement-left";
+  overlay.textContent = formattedRemaining;
+  overlay.setAttribute("aria-label", `${formattedRemaining} ${getMovementUnit()} movement remaining`);
+  return overlay;
+}
+
+function getCombatTokenIds(combat = game.combat) {
+  return new Set(combat?.combatants?.map(c => c.tokenId).filter(Boolean) ?? []);
+}
+
+function getTokenDocFromCombatant(combatant) {
+  return combatant?.token ?? canvas.tokens.get(combatant?.tokenId)?.document;
+}
+
+function appendMovementLeft(wrapper, iconIndex, tokenDoc, combatTokenIds) {
+  if (iconIndex !== MOVEMENT_ICON_INDEX || !combatTokenIds.has(tokenDoc.id)) return;
+
+  const overlay = createMovementLeftElement(tokenDoc);
+  if (overlay) wrapper.appendChild(overlay);
 }
 
 Hooks.on("preCreateToken", (tokenDoc, data, options, userId) => {
@@ -284,6 +368,7 @@ Hooks.on("updateToken", async (tokenDoc, updates, options, userId) => {
       const total = (tokenMovementMap.get(tokenDoc.id) ?? 0) + segDist;
       tokenMovementMap.set(tokenDoc.id, total);
       await trackTokenMovement(tokenDoc, total);
+      refreshTokenDisplays(tokenDoc);
     }
   }
 });
@@ -309,6 +394,7 @@ Hooks.on("renderTokenHUD", async (hud, html, data) => {
   const iconCount = game.settings.get("action-tracker", "iconCount");
   const enableSounds = game.settings.get("action-tracker", "enableSounds");
   const removeColor = game.settings.get("action-tracker", "removeColorWhenUsed");
+  const combatTokenIds = getCombatTokenIds();
 
   for (let i = 0; i < iconCount; i++) {
     const image = game.settings.get("action-tracker", `icon${i}Image`);
@@ -322,12 +408,13 @@ Hooks.on("renderTokenHUD", async (hud, html, data) => {
     const dotWrapper = document.createElement("div");
     dotWrapper.className = "action-dot-wrapper";
 
-    const svgElement = await getSvgElement(image, tint, used, removeColor);
+    const svgElement = await getIconElement(image, tint, used, removeColor);
 
     const tooltip = document.createElement("span");
     tooltip.className = "action-tooltip";
     tooltip.textContent = text;
     dotWrapper.appendChild(svgElement);
+    appendMovementLeft(dotWrapper, i, token.document, combatTokenIds);
     dotWrapper.appendChild(tooltip);
 
     dotWrapper.addEventListener("click", async (event) => {
@@ -340,11 +427,7 @@ Hooks.on("renderTokenHUD", async (hud, html, data) => {
       await token.document.setFlag("action-tracker", `action${i}.used`, newState);
       svgElement.classList.toggle("used", newState);
       if (removeColor) {
-        const newColor = newState ? "#ffffff" : tint;
-        svgElement.querySelectorAll("path, circle, rect").forEach(el => {
-          el.setAttribute("fill", newColor);
-        });
-        svgElement.style.borderColor = newColor;
+        applyIconColor(svgElement, tint, newState, removeColor);
       }
       if (enableSounds) playSound(sound);
       if (game.combat && ui.combat) ui.combat.render({ force: true });
@@ -418,6 +501,7 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
   const iconCount = game.settings.get("action-tracker", "iconCount");
   const removeColor = game.settings.get("action-tracker", "removeColorWhenUsed");
   const enableSounds = game.settings.get("action-tracker", "enableSounds");
+  const combatTokenIds = getCombatTokenIds(combat);
 
   for (const combatant of combat.combatants) {
     if (!combatant?.tokenId) {
@@ -458,18 +542,20 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
 
       if (!tint.match(/^#[0-9A-Fa-f]{6}$/)) tint = "#ffffff";
 
-      const svgElement = await getSvgElement(image, tint, used, removeColor, "16px");
+      const svgElement = await getIconElement(image, tint, used, removeColor, "16px");
+      // Moved before click handler registration so appendMovementLeft can access it.
+      const tokenDoc = getTokenDocFromCombatant(combatant);
 
       const wrapper = document.createElement("div");
       wrapper.className = "action-dot-wrapper-tracker";
       wrapper.style.cursor = "pointer";
       wrapper.setAttribute("data-tooltip", text);
       wrapper.appendChild(svgElement);
+      if (tokenDoc) appendMovementLeft(wrapper, i, tokenDoc, combatTokenIds);
 
       wrapper.addEventListener("click", async (event) => {
         event.stopPropagation();
         event.preventDefault();
-        const tokenDoc = combatant.token ?? canvas.tokens.get(combatant.tokenId)?.document;
         if (!tokenDoc) {
           if (game.settings.get("action-tracker", "debug")) {
             console.warn(`Action Tracker | No token document for ${combatant.name || combatant.id} on click`);
@@ -483,11 +569,7 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
         await tokenDoc.setFlag("action-tracker", `action${i}.used`, newState);
         svgElement.classList.toggle("used", newState);
         if (removeColor) {
-          const newColor = newState ? "#ffffff" : tint;
-          svgElement.querySelectorAll("path, circle, rect").forEach(el => {
-            el.setAttribute("fill", newColor);
-          });
-          svgElement.style.borderColor = newColor;
+          applyIconColor(svgElement, tint, newState, removeColor);
         }
         if (enableSounds) playSound(sound);
         if (game.combat && ui.combat) ui.combat.render({ force: true });
@@ -539,6 +621,7 @@ async function renderActorSheetHandler(sheet, html, data) {
   const iconCount = game.settings.get("action-tracker", "iconCount");
   const removeColor = game.settings.get("action-tracker", "removeColorWhenUsed");
   const enableSounds = game.settings.get("action-tracker", "enableSounds");
+  const combatTokenIds = getCombatTokenIds();
 
   const container = document.createElement("div");
   container.className = "action-tracker-sheet";
@@ -552,12 +635,13 @@ async function renderActorSheetHandler(sheet, html, data) {
 
     if (!tint.match(/^#[0-9A-Fa-f]{6}$/)) tint = "#ffffff";
 
-    const svgElement = await getSvgElement(image, tint, used, removeColor);
+    const svgElement = await getIconElement(image, tint, used, removeColor);
 
     const dotWrapper = document.createElement("div");
     dotWrapper.className = "action-dot-wrapper-sheet";
     dotWrapper.setAttribute("data-tooltip", text);
     dotWrapper.appendChild(svgElement);
+    appendMovementLeft(dotWrapper, i, tokenDoc, combatTokenIds);
 
     dotWrapper.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -685,13 +769,13 @@ async function trackTokenMovement(tokenDoc, totalFeet) {
   if (!game.combat) return;
   if (!game.combat.combatants.some(c => c.tokenId === tokenDoc.id)) return;
 
-  const moveIconIndex = 3;
+  const moveIconIndex = MOVEMENT_ICON_INDEX;
   if (moveIconIndex >= game.settings.get("action-tracker", "iconCount")) return;
 
   const alreadyUsed = tokenDoc.getFlag("action-tracker", `action${moveIconIndex}`)?.used;
   if (alreadyUsed) return;
 
-  const walkSpeed = tokenDoc.actor?.system?.attributes?.movement?.walk ?? 30;
+  const walkSpeed = getWalkSpeed(tokenDoc) ?? 30;
   const threshold = setting === "any" ? 0 : setting === "half" ? walkSpeed / 2 : walkSpeed;
 
   if (game.settings.get("action-tracker", "debug")) {

@@ -23,13 +23,31 @@
   pointer-events: auto;
 }
 
-.action-dot-wrapper svg {
+.action-dot-wrapper :is(svg, img) {
   border: 1px solid; /* Tint set inline */
   border-radius: 4px;
 }
 
-.action-dot-wrapper svg.used {
+.action-dot-wrapper :is(svg, img).used {
   opacity: 0.25;
+}
+
+.action-movement-left {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  min-width: 14px;
+  padding: 0 2px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 10px;
+  line-height: 11px;
+  text-align: center;
+  text-shadow: 0 0 2px #000;
+  pointer-events: none;
 }
 
 .action-tracker-icons {
@@ -47,14 +65,14 @@
   cursor: pointer;
 }
 
-.action-tracker-icons svg {
+.action-tracker-icons :is(svg, img) {
   border: 1px solid; /* Tint set inline, thinner for tracker */
   border-radius: 2px;
   position: absolute;
-  top: 0; /* Pin SVG to top, leaving space below */
+  top: 0; /* Pin icon to top, leaving space below */
 }
 
-.action-tracker-icons svg.used {
+.action-tracker-icons :is(svg, img).used {
   opacity: 0.25;
 }
 
@@ -96,11 +114,11 @@
   position: relative;
 }
 
-.action-dot-wrapper-sheet svg {
+.action-dot-wrapper-sheet :is(svg, img) {
   border: 1px solid;
   border-radius: 4px;
 }
 
-.action-dot-wrapper-sheet svg.used {
+.action-dot-wrapper-sheet :is(svg, img).used {
   opacity: 0.25;
 }
