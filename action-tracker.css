@@ -32,6 +32,24 @@
   opacity: 0.25;
 }
 
+.action-movement-left {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  min-width: 14px;
+  padding: 0 2px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 10px;
+  line-height: 11px;
+  text-align: center;
+  text-shadow: 0 0 2px #000;
+  pointer-events: none;
+}
+
 .action-tracker-icons {
   display: inline-flex;
   gap: 3px;

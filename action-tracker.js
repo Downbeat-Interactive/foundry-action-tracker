@@ -229,6 +229,7 @@ const tokenMovementMap = new Map();
 // Last confirmed pixel position per token, keyed by TokenDocument id.
 // Initialised at turn start (reliable) and updated on every move.
 const tokenLastKnownPosition = new Map();
+const MOVEMENT_ICON_INDEX = 3;
 
 function isSvgImage(image) {
   const cleanedPath = String(image ?? "").split(/[?#]/)[0].toLowerCase();
@@ -294,6 +295,37 @@ async function getIconElement(image, tint, used, removeColor, size = "20px") {
   return icon;
 }
 
+function getWalkSpeed(tokenDoc) {
+  const walkSpeed = Number(tokenDoc.actor?.system?.attributes?.movement?.walk);
+  return Number.isFinite(walkSpeed) && walkSpeed > 0 ? walkSpeed : null;
+}
+
+function formatMovementLeft(distance) {
+  const rounded = Math.round(distance * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function createMovementLeftElement(tokenDoc) {
+  const walkSpeed = getWalkSpeed(tokenDoc);
+  if (walkSpeed === null) return null;
+
+  const moved = tokenMovementMap.get(tokenDoc.id) ?? 0;
+  const remaining = Math.max(walkSpeed - moved, 0);
+  const overlay = document.createElement("span");
+  overlay.className = "action-movement-left";
+  overlay.textContent = formatMovementLeft(remaining);
+  overlay.setAttribute("aria-label", `${formatMovementLeft(remaining)} ft movement remaining`);
+  return overlay;
+}
+
+function appendMovementLeft(wrapper, iconIndex, tokenDoc) {
+  if (iconIndex !== MOVEMENT_ICON_INDEX || !game.combat) return;
+  if (!game.combat.combatants.some(c => c.tokenId === tokenDoc.id)) return;
+
+  const overlay = createMovementLeftElement(tokenDoc);
+  if (overlay) wrapper.appendChild(overlay);
+}
+
 Hooks.on("preCreateToken", (tokenDoc, data, options, userId) => {
   const iconCount = game.settings.get("action-tracker", "iconCount");
   const flags = {};
@@ -320,6 +352,7 @@ Hooks.on("updateToken", async (tokenDoc, updates, options, userId) => {
       const total = (tokenMovementMap.get(tokenDoc.id) ?? 0) + segDist;
       tokenMovementMap.set(tokenDoc.id, total);
       await trackTokenMovement(tokenDoc, total);
+      refreshTokenDisplays(tokenDoc);
     }
   }
 });
@@ -364,6 +397,7 @@ Hooks.on("renderTokenHUD", async (hud, html, data) => {
     tooltip.className = "action-tooltip";
     tooltip.textContent = text;
     dotWrapper.appendChild(svgElement);
+    appendMovementLeft(dotWrapper, i, token.document);
     dotWrapper.appendChild(tooltip);
 
     dotWrapper.addEventListener("click", async (event) => {
@@ -491,17 +525,18 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
       if (!tint.match(/^#[0-9A-Fa-f]{6}$/)) tint = "#ffffff";
 
       const svgElement = await getIconElement(image, tint, used, removeColor, "16px");
+      const tokenDoc = combatant.token ?? canvas.tokens.get(combatant.tokenId)?.document;
 
       const wrapper = document.createElement("div");
       wrapper.className = "action-dot-wrapper-tracker";
       wrapper.style.cursor = "pointer";
       wrapper.setAttribute("data-tooltip", text);
       wrapper.appendChild(svgElement);
+      if (tokenDoc) appendMovementLeft(wrapper, i, tokenDoc);
 
       wrapper.addEventListener("click", async (event) => {
         event.stopPropagation();
         event.preventDefault();
-        const tokenDoc = combatant.token ?? canvas.tokens.get(combatant.tokenId)?.document;
         if (!tokenDoc) {
           if (game.settings.get("action-tracker", "debug")) {
             console.warn(`Action Tracker | No token document for ${combatant.name || combatant.id} on click`);
@@ -586,6 +621,7 @@ async function renderActorSheetHandler(sheet, html, data) {
     dotWrapper.className = "action-dot-wrapper-sheet";
     dotWrapper.setAttribute("data-tooltip", text);
     dotWrapper.appendChild(svgElement);
+    appendMovementLeft(dotWrapper, i, tokenDoc);
 
     dotWrapper.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -713,13 +749,13 @@ async function trackTokenMovement(tokenDoc, totalFeet) {
   if (!game.combat) return;
   if (!game.combat.combatants.some(c => c.tokenId === tokenDoc.id)) return;
 
-  const moveIconIndex = 3;
+  const moveIconIndex = MOVEMENT_ICON_INDEX;
   if (moveIconIndex >= game.settings.get("action-tracker", "iconCount")) return;
 
   const alreadyUsed = tokenDoc.getFlag("action-tracker", `action${moveIconIndex}`)?.used;
   if (alreadyUsed) return;
 
-  const walkSpeed = tokenDoc.actor?.system?.attributes?.movement?.walk ?? 30;
+  const walkSpeed = getWalkSpeed(tokenDoc) ?? 30;
   const threshold = setting === "any" ? 0 : setting === "half" ? walkSpeed / 2 : walkSpeed;
 
   if (game.settings.get("action-tracker", "debug")) {
