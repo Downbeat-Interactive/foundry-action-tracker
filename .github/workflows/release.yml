@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+env:
+  PACKAGE_TYPE: module
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare Foundry release assets
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REPOSITORY: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+        run: |
+          python <<'PY'
+          import json
+          import os
+          import shutil
+          from pathlib import Path
+
+          package_type = os.environ["PACKAGE_TYPE"]
+          release_tag = os.environ["RELEASE_TAG"]
+          repository = os.environ["REPOSITORY"]
+          server_url = os.environ["SERVER_URL"]
+          version = release_tag[1:] if release_tag.startswith("v") else release_tag
+
+          dist = Path("dist")
+          if dist.exists():
+              shutil.rmtree(dist)
+          dist.mkdir()
+
+          for path in ["action-tracker.css", "action-tracker.js", "lang"]:
+              source = Path(path)
+              target = dist / path
+              if source.is_dir():
+                  shutil.copytree(source, target)
+              else:
+                  shutil.copy2(source, target)
+
+          manifest_path = Path(f"{package_type}.json")
+          manifest = json.loads(manifest_path.read_text())
+          release_url = f"{server_url}/{repository}"
+          manifest["version"] = version
+          manifest["url"] = release_url
+          manifest["manifest"] = f"{release_url}/releases/latest/download/{package_type}.json"
+          manifest["download"] = f"{release_url}/releases/download/{release_tag}/{package_type}.zip"
+
+          (dist / manifest_path.name).write_text(json.dumps(manifest, indent=2) + "\n")
+          PY
+
+      - name: Validate Foundry manifest
+        run: python -m json.tool "dist/${{ env.PACKAGE_TYPE }}.json" > /dev/null
+
+      - name: Create release zip
+        working-directory: dist
+        run: zip -r "../${{ env.PACKAGE_TYPE }}.zip" .
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" "dist/${{ env.PACKAGE_TYPE }}.json" "${{ env.PACKAGE_TYPE }}.zip" --clobber
+
+      - name: Ensure Foundry API key is configured
+        env:
+          FOUNDRY_KEY: ${{ secrets.FOUNDRY_KEY }}
+        run: test -n "$FOUNDRY_KEY"
+
+      - name: Publish release to Foundry
+        env:
+          FOUNDRY_KEY: ${{ secrets.FOUNDRY_KEY }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REPOSITORY: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+        run: |
+          python <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          package_type = os.environ["PACKAGE_TYPE"]
+          release_tag = os.environ["RELEASE_TAG"]
+          repository = os.environ["REPOSITORY"]
+          server_url = os.environ["SERVER_URL"]
+          version = release_tag[1:] if release_tag.startswith("v") else release_tag
+          release_url = f"{server_url}/{repository}"
+
+          manifest = json.loads(Path(f"dist/{package_type}.json").read_text())
+          payload = {
+              "id": manifest["id"],
+              "release": {
+                  "version": version,
+                  "manifest": f"{release_url}/releases/download/{release_tag}/{package_type}.json",
+                  "notes": f"{release_url}/releases/tag/{release_tag}/",
+                  "compatibility": manifest["compatibility"],
+              },
+          }
+          Path("/tmp/foundry-release-payload.json").write_text(json.dumps(payload))
+          PY
+
+          curl --fail-with-body --show-error --silent \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --header "Authorization: ${FOUNDRY_KEY}" \
+            --data @/tmp/foundry-release-payload.json \
+            "https://api.foundryvtt.com/_api/packages/release_version"
