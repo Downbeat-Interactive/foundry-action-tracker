@@ -23,12 +23,12 @@
   pointer-events: auto;
 }
 
-.action-dot-wrapper svg {
+.action-dot-wrapper :is(svg, img) {
   border: 1px solid; /* Tint set inline */
   border-radius: 4px;
 }
 
-.action-dot-wrapper svg.used {
+.action-dot-wrapper :is(svg, img).used {
   opacity: 0.25;
 }
 
@@ -47,14 +47,14 @@
   cursor: pointer;
 }
 
-.action-tracker-icons svg {
+.action-tracker-icons :is(svg, img) {
   border: 1px solid; /* Tint set inline, thinner for tracker */
   border-radius: 2px;
   position: absolute;
   top: 0; /* Pin SVG to top, leaving space below */
 }
 
-.action-tracker-icons svg.used {
+.action-tracker-icons :is(svg, img).used {
   opacity: 0.25;
 }
 
@@ -96,11 +96,11 @@
   position: relative;
 }
 
-.action-dot-wrapper-sheet svg {
+.action-dot-wrapper-sheet :is(svg, img) {
   border: 1px solid;
   border-radius: 4px;
 }
 
-.action-dot-wrapper-sheet svg.used {
+.action-dot-wrapper-sheet :is(svg, img).used {
   opacity: 0.25;
 }
