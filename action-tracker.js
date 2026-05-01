@@ -233,7 +233,9 @@ const tokenLastKnownPosition = new Map();
 function isSvgImage(image) {
   const path = String(image ?? "").split(/[?#]/)[0].toLowerCase();
   const filename = path.substring(path.lastIndexOf("/") + 1);
-  return filename.split(".").pop() === "svg";
+  if (!filename) return false;
+  const extension = filename.split(".").pop();
+  return extension === "svg";
 }
 
 function createFallbackSvg(tint) {
@@ -276,7 +278,7 @@ async function getIconElement(image, tint, used, removeColor, size = "20px") {
       const parser = new DOMParser();
       const svgDoc = parser.parseFromString(svgText, "image/svg+xml");
       const svg = svgDoc.documentElement;
-      if (svg?.tagName?.toLowerCase() !== "svg") throw new Error("Icon is not an SVG");
+      if (svg?.tagName?.toLowerCase() !== "svg") throw new Error("Invalid SVG file format");
       svgCache.set(image, svg.cloneNode(true));
     } catch (e) {
       if (game.settings.get("action-tracker", "debug")) {
