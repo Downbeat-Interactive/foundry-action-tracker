@@ -30,7 +30,7 @@ jobs:
           import shutil
           from pathlib import Path
 
-          package_type = os.environ["PACKAGE_TYPE"]
+          package_type = os.environ.get("PACKAGE_TYPE", "module")
           release_tag = os.environ["RELEASE_TAG"]
           repository = os.environ["REPOSITORY"]
           server_url = os.environ["SERVER_URL"]
@@ -94,7 +94,7 @@ jobs:
           import os
           from pathlib import Path
 
-          package_type = os.environ["PACKAGE_TYPE"]
+          package_type = os.environ.get("PACKAGE_TYPE", "module")
           release_tag = os.environ["RELEASE_TAG"]
           repository = os.environ["REPOSITORY"]
           server_url = os.environ["SERVER_URL"]
