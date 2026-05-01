@@ -231,8 +231,8 @@ const tokenMovementMap = new Map();
 const tokenLastKnownPosition = new Map();
 
 function isSvgImage(image) {
-  const pathWithoutQuery = String(image ?? "").split(/[?#]/)[0].toLowerCase();
-  const filenameSegment = pathWithoutQuery.substring(pathWithoutQuery.lastIndexOf("/") + 1);
+  const cleanedPath = String(image ?? "").split(/[?#]/)[0].toLowerCase();
+  const filenameSegment = cleanedPath.substring(cleanedPath.lastIndexOf("/") + 1);
   const extensionMatch = filenameSegment.match(/\.([^.]+)$/);
   return extensionMatch?.[1] === "svg";
 }
