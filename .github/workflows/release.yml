@@ -76,7 +76,11 @@ jobs:
       - name: Ensure Foundry API key is configured
         env:
           FOUNDRY_KEY: ${{ secrets.FOUNDRY_KEY }}
-        run: test -n "$FOUNDRY_KEY"
+        run: |
+          if [ -z "$FOUNDRY_KEY" ]; then
+            echo "Error: FOUNDRY_KEY secret is not configured"
+            exit 1
+          fi
 
       - name: Publish release to Foundry
         env:
@@ -103,7 +107,7 @@ jobs:
               "release": {
                   "version": version,
                   "manifest": f"{release_url}/releases/download/{release_tag}/{package_type}.json",
-                  "notes": f"{release_url}/releases/tag/{release_tag}/",
+                  "notes": f"{release_url}/releases/tag/{release_tag}",
                   "compatibility": manifest["compatibility"],
               },
           }
