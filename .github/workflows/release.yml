@@ -74,13 +74,17 @@ jobs:
         run: gh release upload "$RELEASE_TAG" "dist/${{ env.PACKAGE_TYPE }}.json" "${{ env.PACKAGE_TYPE }}.zip" --clobber
 
       - name: Publish release to Foundry
-        if: ${{ secrets.FOUNDRY_KEY != '' }}
         env:
           FOUNDRY_KEY: ${{ secrets.FOUNDRY_KEY }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           REPOSITORY: ${{ github.repository }}
           SERVER_URL: ${{ github.server_url }}
         run: |
+          if [ -z "$FOUNDRY_KEY" ]; then
+            echo "FOUNDRY_KEY secret is not configured; skipping Foundry API publication."
+            exit 0
+          fi
+
           python <<'PY'
           import json
           import os
