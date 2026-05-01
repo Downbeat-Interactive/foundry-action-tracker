@@ -229,7 +229,7 @@ const tokenMovementMap = new Map();
 // Last confirmed pixel position per token, keyed by TokenDocument id.
 // Initialised at turn start (reliable) and updated on every move.
 const tokenLastKnownPosition = new Map();
-const MOVEMENT_ICON_INDEX = 3;
+const MOVEMENT_ACTION_ICON_INDEX = 3;
 
 function isSvgImage(image) {
   const cleanedPath = String(image ?? "").split(/[?#]/)[0].toLowerCase();
@@ -305,22 +305,30 @@ function formatMovementLeft(distance) {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
+function getMovementUnit() {
+  return canvas.scene?.grid?.units || "ft";
+}
+
 function createMovementLeftElement(tokenDoc) {
   const walkSpeed = getWalkSpeed(tokenDoc);
   if (walkSpeed === null) return null;
 
   const moved = tokenMovementMap.get(tokenDoc.id) ?? 0;
   const remaining = Math.max(walkSpeed - moved, 0);
+  const formattedRemaining = formatMovementLeft(remaining);
   const overlay = document.createElement("span");
   overlay.className = "action-movement-left";
-  overlay.textContent = formatMovementLeft(remaining);
-  overlay.setAttribute("aria-label", `${formatMovementLeft(remaining)} ft movement remaining`);
+  overlay.textContent = formattedRemaining;
+  overlay.setAttribute("aria-label", `${formattedRemaining} ${getMovementUnit()} movement remaining`);
   return overlay;
 }
 
-function appendMovementLeft(wrapper, iconIndex, tokenDoc) {
-  if (iconIndex !== MOVEMENT_ICON_INDEX || !game.combat) return;
-  if (!game.combat.combatants.some(c => c.tokenId === tokenDoc.id)) return;
+function getCombatTokenIds(combat = game.combat) {
+  return new Set(combat?.combatants?.map(c => c.tokenId).filter(Boolean) ?? []);
+}
+
+function appendMovementLeft(wrapper, iconIndex, tokenDoc, combatTokenIds) {
+  if (iconIndex !== MOVEMENT_ACTION_ICON_INDEX || !combatTokenIds.has(tokenDoc.id)) return;
 
   const overlay = createMovementLeftElement(tokenDoc);
   if (overlay) wrapper.appendChild(overlay);
@@ -378,6 +386,7 @@ Hooks.on("renderTokenHUD", async (hud, html, data) => {
   const iconCount = game.settings.get("action-tracker", "iconCount");
   const enableSounds = game.settings.get("action-tracker", "enableSounds");
   const removeColor = game.settings.get("action-tracker", "removeColorWhenUsed");
+  const combatTokenIds = getCombatTokenIds();
 
   for (let i = 0; i < iconCount; i++) {
     const image = game.settings.get("action-tracker", `icon${i}Image`);
@@ -397,7 +406,7 @@ Hooks.on("renderTokenHUD", async (hud, html, data) => {
     tooltip.className = "action-tooltip";
     tooltip.textContent = text;
     dotWrapper.appendChild(svgElement);
-    appendMovementLeft(dotWrapper, i, token.document);
+    appendMovementLeft(dotWrapper, i, token.document, combatTokenIds);
     dotWrapper.appendChild(tooltip);
 
     dotWrapper.addEventListener("click", async (event) => {
@@ -484,6 +493,7 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
   const iconCount = game.settings.get("action-tracker", "iconCount");
   const removeColor = game.settings.get("action-tracker", "removeColorWhenUsed");
   const enableSounds = game.settings.get("action-tracker", "enableSounds");
+  const combatTokenIds = getCombatTokenIds(combat);
 
   for (const combatant of combat.combatants) {
     if (!combatant?.tokenId) {
@@ -532,7 +542,7 @@ Hooks.on("renderCombatTracker", async (tracker, html, data) => {
       wrapper.style.cursor = "pointer";
       wrapper.setAttribute("data-tooltip", text);
       wrapper.appendChild(svgElement);
-      if (tokenDoc) appendMovementLeft(wrapper, i, tokenDoc);
+      if (tokenDoc) appendMovementLeft(wrapper, i, tokenDoc, combatTokenIds);
 
       wrapper.addEventListener("click", async (event) => {
         event.stopPropagation();
@@ -602,6 +612,7 @@ async function renderActorSheetHandler(sheet, html, data) {
   const iconCount = game.settings.get("action-tracker", "iconCount");
   const removeColor = game.settings.get("action-tracker", "removeColorWhenUsed");
   const enableSounds = game.settings.get("action-tracker", "enableSounds");
+  const combatTokenIds = getCombatTokenIds();
 
   const container = document.createElement("div");
   container.className = "action-tracker-sheet";
@@ -621,7 +632,7 @@ async function renderActorSheetHandler(sheet, html, data) {
     dotWrapper.className = "action-dot-wrapper-sheet";
     dotWrapper.setAttribute("data-tooltip", text);
     dotWrapper.appendChild(svgElement);
-    appendMovementLeft(dotWrapper, i, tokenDoc);
+    appendMovementLeft(dotWrapper, i, tokenDoc, combatTokenIds);
 
     dotWrapper.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -749,7 +760,7 @@ async function trackTokenMovement(tokenDoc, totalFeet) {
   if (!game.combat) return;
   if (!game.combat.combatants.some(c => c.tokenId === tokenDoc.id)) return;
 
-  const moveIconIndex = MOVEMENT_ICON_INDEX;
+  const moveIconIndex = MOVEMENT_ACTION_ICON_INDEX;
   if (moveIconIndex >= game.settings.get("action-tracker", "iconCount")) return;
 
   const alreadyUsed = tokenDoc.getFlag("action-tracker", `action${moveIconIndex}`)?.used;
